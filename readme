@@ -1,1 +1,211 @@
+Client TFTP - README
 
+1   Validation des arguments 
+
+ Code   : 
+ 
+if (argc != 4) {
+    printf("Usage :  /client <serveur> <port> <fichier>\n");
+    exit(EXIT_FAILURE);
+}
+ 
+   Explication : 
+
+- Le programme vérifie que trois arguments (serveur, port, et fichier) sont fournis 
+- Si ce n'est pas le cas, un message d'erreur est affiché et le programme s'arrête 
+
+
+  2   Résolution de l'adresse du serveur 
+
+ Code   : 
+ 
+struct addrinfo hints, *result;
+memset(&hints, 0, sizeof(hints));
+hints ai_family = AF_INET;       // Utilisation d'IPv4
+hints ai_protocol = IPPROTO_UDP; // Protocole UDP
+
+if (getaddrinfo(argv[1], argv[2], &hints, &result) != 0) {
+    perror("Erreur lors de la résolution de l'adresse");
+    exit(EXIT_FAILURE);
+}
+ 
+
+   Explication : 
+
+- `getaddrinfo` traduit l'adresse et le port fournis en arguments en une structure `addrinfo`
+- `AF_INET` --> IPv4 et `IPPROTO_UDP` --> UDP 
+
+ Fonctions  :
+
+- `memset` : Initialise la structure `hints` à zéro 
+- `getaddrinfo` : Résout une adresse en une structure adaptée au socket 
+- `perror` : Affiche un message d'erreur en cas d'échec 
+
+ 
+
+  3   Création d’un socket 
+
+ Code   : 
+ 
+int sd = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+if (sd < 0) {
+    perror("Erreur lors de la création du socket");
+    freeaddrinfo(result);
+    exit(EXIT_FAILURE);
+}
+ 
+
+   Explication : 
+
+- Le socket est l'élément central de la communication  Il permet d'envoyer et de recevoir des données via le réseau 
+- Les paramètres proviennent de la structure `addrinfo` obtenue précédemment 
+
+   Fonctions  : 
+
+- `socket` : Crée un socket réseau 
+- `perror` : Affiche un message d'erreur si la création du socket échoue 
+
+ 
+
+  4   Construction et envoi d’une requête en lecture (RRQ) 
+
+ Code   : 
+ 
+char rrq[128] = {0};
+rrq[1] = 1; // Opcode pour RRQ
+sprintf(rrq + 2, "%s", argv[3]); // Nom du fichier
+sprintf(rrq + 3 + strlen(argv[3]), "octet"); // Mode
+
+if (sendto(sd, rrq, strlen(argv[3]) + 9, 0, result->ai_addr, result->ai_addrlen) < 0) {
+    perror("Erreur lors de l'envoi de la requête RRQ");
+    close(sd);
+    freeaddrinfo(result);
+    exit(EXIT_FAILURE);
+}
+ 
+
+ Explication : 
+- Le message RRQ est construit selon le format spécifié dans la RFC : opcode (1), nom du fichier, mode ("octet") et séparateurs nuls 
+- `sendto` envoie la requête au serveur TFTP via le socket 
+
+ Fonctions  : 
+- `sprintf` : Construit la chaîne RRQ dans un tampon 
+- `sendto` : Envoie les données via le socket à l'adresse spécifiée 
+
+ 
+
+  5   Réception des paquets de données 
+
+ Code   : 
+ 
+char buffer[516];
+int bytes = recvfrom(sd, buffer, 516, 0, &data_connexion, &data_connexion_length);
+if (bytes < 0) {
+    perror("Erreur lors de la réception des données");
+    exit(EXIT_FAILURE);
+}
+ 
+
+   Explication : 
+
+- `recvfrom` reçoit un paquet de données du servur
+- Le programme vérifie que le paquet n'est pas une erreur avant d'écrire les données dans un fichier 
+
+ Fonctions  : 
+- `recvfrom` : Reçoit des données via le socket 
+- `perror` : Affiche un message d'erreur en cas d'échec 
+
+ 
+
+  6   Envoi d’un acquittement (ACK) 
+ Code   : 
+ 
+char ack[4] = {0};
+ack[1] = 4; // Opcode pour ACK
+ack[2] = buffer[2];
+ack[3] = buffer[3];
+
+if (sendto(sd, ack, sizeof(ack), 0, &data_connexion, data_connexion_length) < 0) {
+    perror("Erreur lors de l'envoi de l'ACK");
+    exit(EXIT_FAILURE);
+}
+ 
+
+ Explication : 
+
+- L’acquittement informe le serveur que le bloc reçu est bien arrivé 
+- Le numéro de bloc est récupéré du paquet reçu (octets 2 et 3) 
+
+ Fonctions  : 
+
+- `sendto` : Envoie un paquet d'acquittement (ACK) au serveur 
+
+ 
+
+  7   Écriture des données dans un fichier *
+
+ Code   : 
+ 
+int fd = open(argv[3], O_CREAT | O_WRONLY, S_IRWXU);
+if (fd < 0) {
+    perror("Erreur lors de l'ouverture du fichier");
+    exit(EXIT_FAILURE);
+}
+
+write(fd, buffer + 4, bytes - 4);
+ 
+
+ Explication : 
+
+- `open` ouvre un fichier local en mode écriture 
+- `write` écrit les données reçues à partir du 5ᵉ octet du tampon (après l'en-tête TFTP) 
+
+
+
+
+
+
+Validation des arguments :
+
+  J’ai appris l’impotance de vérifier les entrées utilisateur pour éviter des erreurs imprévues ou des comportements inattendus dans le programme 
+
+Résolution d'adrese :
+  
+  J’ai découvert la fonction getadrinfo, qui m’a permis de rendre mon programme plus portable et compatible avec IPv4 et IPv6 
+ 
+Création de socket :
+  
+  J’ai utilisé les fontions socket, sendto et recvfrom pour communiquer via UDP, ce qui m’a permis de mieux comprendre le rôle d’un socket dans une application réseau 
+  Ce qui m’a surpris, c’est que UDP est un protocole sans garantie de livraison, ce qui m’a oblgé à réfléchir à la manière dont le TFTP compense cette absence de fiabilité 
+
+Requête en lecture (RRQ) :
+
+  J’ai respecté le format strict des paquets TFTP pour construire une requête RRQ en utilisant sprintf pour asembler les données 
+  J’ai aussi apris à envoyer cette requête au serveur en utilisant la fonction sendto 
+
+Réception des données :
+  
+  J’ai appris à gérer les paquets de données reçus, notammen  en extrayant les informations utiles à partir du 5ᵉ octet du tampon 
+  J’ai aussi implémenté l’envoi d’acquittements (ACK) pour chaque bloc reçu, ce qui m’a fait comrendre l’importance de cette étape pour permettre au serveur de continuer l’envoi 
+
+Gestion des ereurs :
+  
+  J’ai découvert comment le protocole TFTP utilise les paquets ERR pour signaler des problèmes, comme un fichier introuvable ou une violation d’accès 
+  J’ai appris à traiTer ces erreurs pour que le programme puisse réagir correctement en CAS DE problème 
+
+Écriture dans un fichier :
+  
+  J’ai manipulé des fichiers de manièr bas niveau avec les fonctions open, write et close, ce qui m’a permis de mieux comprendre les interactions directes avec le système de fichiers 
+  J’ai trouvé intéressant de gérer manuelement le tampon de données pour écrire les blocs reçus dans le fichier 
+
+
+
+
+
+
+
+
+
+
+
+ 
